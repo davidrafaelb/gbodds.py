@@ -15,87 +15,60 @@ def calcular_todos_escenarios(a, b, x, y, win1, win2, place1, place2, commission
     """Calcula TODOS los 7 escenarios posibles"""
     com_factor = 1 - commission
     
-    escenarios = [
-        a*(win1-1) - b - x*(place1-1) + y*com_factor,  # 1: G1 gana, G2 no
-        -a + b*(win2-1) + x*com_factor - y*(place2-1), # 2: G2 gana, G1 no
-        -a + b*(win2-1) - x*(place1-1) - y*(place2-1), # 3: G1 2do, G2 gana
-        a*(win1-1) - b - x*(place1-1) - y*(place2-1),  # 4: G2 2do, G1 gana
-        -a - b - x*(place1-1) + y*com_factor,          # 5: G1 2do, OTRO gana
-        -a - b + x*com_factor - y*(place2-1),          # 6: G2 2do, OTRO gana
-        -a - b + x*com_factor + y*com_factor           # 7: Ambos no
-    ]
+    # ESCENARIO 1: G1 gana, G2 no coloca
+    G1 = a*(win1-1) - b - x*(place1-1) + y*com_factor
     
-    return escenarios
+    # ESCENARIO 2: G2 gana, G1 no coloca
+    G2 = -a + b*(win2-1) + x*com_factor - y*(place2-1)
+    
+    # ESCENARIO 3: G1 2do, G2 gana (ambos se colocan)
+    G3 = -a + b*(win2-1) - x*(place1-1) - y*(place2-1)
+    
+    # ESCENARIO 4: G2 2do, G1 gana (ambos se colocan)
+    G4 = a*(win1-1) - b - x*(place1-1) - y*(place2-1)
+    
+    # ESCENARIO 5: G1 2do, OTRO galgo gana
+    G5 = -a - b - x*(place1-1) + y*com_factor
+    
+    # ESCENARIO 6: G2 2do, OTRO galgo gana
+    G6 = -a - b + x*com_factor - y*(place2-1)
+    
+    # ESCENARIO 7: Ambos no colocan
+    G7 = -a - b + x*com_factor + y*com_factor
+    
+    return [G1, G2, G3, G4, G5, G6, G7]
 
-def optimizar_sin_perdidas_grandes(win1, win2, place1, place2, commission=0.02):
-    """Optimización AGRESIVA contra pérdidas grandes"""
+def optimizar_stakes_completo(win1, win2, place1, place2, commission=0.02):
+    """Optimización considerando TODOS los escenarios"""
     a, b = calcular_stakes_ganador(win1, win2)
     
-    best_x, best_y = 0.1, 0.1
+    # Búsqueda grid exhaustiva
+    best_x, best_y = 0, 0
     best_score = -np.inf
-    mejores_ganancias = []
     
-    # Rangos más conservadores para evitar pérdidas
-    for x in np.arange(0.1, 2.0, 0.05):  # Reducido máximo a 2.0
-        for y in np.arange(0.1, 2.0, 0.05):
+    for x in np.arange(0.1, 3.0, 0.05):
+        for y in np.arange(0.1, 3.0, 0.05):
             ganancias = calcular_todos_escenarios(a, b, x, y, win1, win2, place1, place2, commission)
             
-            # Penalización MUY FUERTE para pérdidas grandes
-            perdida_maxima = min(ganancias)
-            ganancia_minima = min(ganancias)
-            ganancia_promedio = np.mean(ganancias)
+            # Score: maximizar la ganancia mínima y minimizar pérdidas grandes
+            ganancia_min = min(ganancias)
+            perdida_max = abs(min([0] + [g for g in ganancias if g < 0]))
             
-            # Score que CASTIGA fuertemente cualquier pérdida > -1
-            if perdida_maxima < -1.5:
-                score = perdida_maxima * 10  # Castigo enorme
-            elif perdida_maxima < -1.0:
-                score = perdida_maxima * 5   # Castigo grande
-            elif perdida_maxima < -0.5:
-                score = perdida_maxima * 2   # Castigo moderado
-            else:
-                # Premiar ganancia mínima y promedio
-                score = ganancia_minima + (ganancia_promedio * 0.5)
+            # Penalizar pérdidas grandes, premiar ganancias consistentes
+            score = ganancia_min - (perdida_max * 0.1)
             
             if score > best_score:
                 best_score = score
                 best_x, best_y = x, y
-                mejores_ganancias = ganancias
     
-    return a, b, best_x, best_y, mejores_ganancias
-
-def encontrar_stakes_conservadoras(win1, win2, place1, place2, commission=0.02):
-    """Encuentra stakes que EVITEN pérdidas grandes"""
-    a, b = calcular_stakes_ganador(win1, win2)
-    
-    # Probar combinaciones MUY conservadoras
-    mejores_stakes = []
-    
-    for max_stake in [0.5, 0.8, 1.0, 1.2, 1.5]:
-        for x in np.arange(0.1, max_stake, 0.1):
-            for y in np.arange(0.1, max_stake, 0.1):
-                ganancias = calcular_todos_escenarios(a, b, x, y, win1, win2, place1, place2, commission)
-                perdida_maxima = min(ganancias)
-                
-                # Solo considerar combinaciones con pérdida máxima > -1
-                if perdida_maxima > -1.0:
-                    ganancia_promedio = np.mean(ganancias)
-                    mejores_stakes.append((x, y, ganancia_promedio, perdida_maxima, ganancias))
-    
-    if mejores_stakes:
-        # Ordenar por mejor ganancia promedio
-        mejores_stakes.sort(key=lambda x: x[2], reverse=True)
-        x, y, _, _, ganancias = mejores_stakes[0]
-        return a, b, x, y, ganancias
-    else:
-        # Si no hay sin pérdidas, usar la menos mala
-        return optimizar_sin_perdidas_grandes(win1, win2, place1, place2, commission)
+    return a, b, best_x, best_y
 
 # INTERFAZ STREAMLIT
-st.set_page_config(page_title="Optimizador Sin Pérdidas", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="Optimizador Completo", page_icon="🏁", layout="centered")
 
-st.title("🛡️ Optimizador SIN Pérdidas Graves")
+st.title("🏁 Optimizador COMPLETO - 7 Escenarios")
 
-st.warning("**OBJETIVO: Eliminar pérdidas > $1.00**")
+st.info("🔍 **Ahora considera TODOS los escenarios posibles**")
 
 # Entrada de datos
 with st.sidebar:
@@ -114,26 +87,20 @@ with st.sidebar:
     
     presupuesto = st.number_input("💰 Presupuesto Back", value=2.0, min_value=1.0, step=0.5)
     commission = st.slider("🎯 Comisión Exchange (%)", 0.0, 10.0, 2.0) / 100
-    
-    estrategia = st.radio("🎯 Estrategia:", 
-                         ["Sin Pérdidas Graves (> -$1.00)", "Optimización Balanceada"])
 
 # Calcular estrategia
-if st.button("🎲 Encontrar Stakes Seguras", type="primary"):
-    
-    if estrategia == "Sin Pérdidas Graves (> -$1.00)":
-        with st.spinner("Buscando stakes SIN pérdidas grandes..."):
-            stake_win1, stake_win2, stake_lay1, stake_lay2, ganancias = encontrar_stakes_conservadoras(
-                win1, win2, place1, place2, commission
-            )
-    else:
-        with st.spinner("Optimizando balanceadamente..."):
-            stake_win1, stake_win2, stake_lay1, stake_lay2, ganancias = optimizar_sin_perdidas_grandes(
-                win1, win2, place1, place2, commission
-            )
+if st.button("🎲 Calcular Estrategia Completa", type="primary"):
+    with st.spinner("Optimizando considerando todos los escenarios..."):
+        stake_win1, stake_win2, stake_lay1, stake_lay2 = optimizar_stakes_completo(
+            win1, win2, place1, place2, commission
+        )
+        ganancias = calcular_todos_escenarios(
+            stake_win1, stake_win2, stake_lay1, stake_lay2,
+            win1, win2, place1, place2, commission
+        )
     
     # MOSTRAR RESULTADOS
-    st.header("💡 Estrategia con Riesgo Controlado")
+    st.header("💡 Estrategia Optimizada")
     
     col1, col2 = st.columns(2)
     
@@ -146,89 +113,76 @@ if st.button("🎲 Encontrar Stakes Seguras", type="primary"):
         st.subheader("Lay a Colocado")
         st.metric("Contra Galgo 1", f"${stake_lay1:.2f}")
         st.metric("Contra Galgo 2", f"${stake_lay2:.2f}")
-        st.caption(f"Stakes reducidas para controlar riesgo")
-
-    # TABLA DE ESCENARIOS
-    st.header("📈 Resultados - Riesgo Controlado")
+    
+    # TABLA COMPLETA DE ESCENARIOS
+    st.header("📈 TODOS los Escenarios Posibles")
     
     escenarios = [
         "G1 gana, G2 no coloca",
         "G2 gana, G1 no coloca", 
-        "G1 2do, G2 gana",
-        "G2 2do, G1 gana",
-        "G1 2do, OTRO galgo gana",
-        "G2 2do, OTRO galgo gana",
+        "G1 2do, G2 gana (ambos colocados)",
+        "G2 2do, G1 gana (ambos colocados)",
+        "🔴 G1 2do, OTRO galgo gana",
+        "🔴 G2 2do, OTRO galgo gana",
         "Ambos no colocan"
     ]
     
     resultados = []
     for i, (esc, gan) in enumerate(zip(escenarios, ganancias)):
-        if gan >= 0:
-            estado = "✅ Ganancia"
-        elif gan >= -0.5:
-            estado = "⚠️ Pérdida Leve" 
-        elif gan >= -1.0:
-            estado = "🔴 Pérdida Moderada"
-        else:
-            estado = "💀 Pérdida Grave"
-            
-        resultados.append({
+        resultado = {
             'Escenario': esc,
             'Ganancia/Neta': f"${gan:.3f}",
-            'Resultado': estado
-        })
+            'Resultado': "✅ Ganancia" if gan >= 0 else "⚠️ Pérdida Leve" if gan >= -1 else "🔴 Pérdida Grave"
+        }
+        resultados.append(resultado)
     
     df_resultados = pd.DataFrame(resultados)
     st.table(df_resultados)
     
-    # ANÁLISIS DE RIESGO
-    st.header("🛡️ Análisis de Riesgo")
+    # ANÁLISIS ESTADÍSTICO
+    st.header("📊 Análisis Estadístico Completo")
     
+    escenarios_ganadores = sum(1 for g in ganancias if g >= 0)
+    escenarios_perdedores = len(ganancias) - escenarios_ganadores
     perdida_maxima = min(ganancias)
-    escenarios_graves = sum(1 for g in ganancias if g < -1.0)
+    ganancia_maxima = max(ganancias)
+    ganancia_promedio = np.mean(ganancias)
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Pérdida Máxima", f"${perdida_maxima:.3f}")
-        if perdida_maxima > -1.0:
-            st.success("✅ Riesgo controlado")
-        elif perdida_maxima > -2.0:
-            st.warning("⚠️ Riesgo moderado")
-        else:
-            st.error("🔴 Riesgo alto")
+        st.metric("Escenarios Ganadores", f"{escenarios_ganadores}/7")
     
     with col2:
-        st.metric("Escenarios Graves", f"{escenarios_graves}/7")
-        if escenarios_graves == 0:
-            st.success("✅ Sin pérdidas graves")
-        else:
-            st.error(f"🔴 {escenarios_graves} escenario(s) con pérdida > $1.00")
-
-    # RECOMENDACIÓN
+        st.metric("Pérdida Máxima", f"${perdida_maxima:.3f}")
+    
+    with col3:
+        st.metric("Ganancia Máxima", f"${ganancia_maxima:.3f}")
+    
+    with col4:
+        st.metric("Ganancia Promedio", f"${ganancia_promedio:.3f}")
+    
+    # RECOMENDACIÓN FINAL
     st.header("🎯 Recomendación Final")
     
-    if perdida_maxima > -0.5:
-        st.success("""
-        **✅ ESTRATEGIA SEGURA**
-        - Pérdidas máximas muy controladas
-        - Riesgo aceptable
-        - Puedes ejecutar con confianza
-        """)
-    elif perdida_maxima > -1.0:
-        st.warning("""
-        **⚠️ ESTRATEGIA MODERADA** 
-        - Pérdidas controladas bajo $1.00
-        - Riesgo manejable
-        - Considerar ejecutar
-        """)
+    if ganancia_promedio > 0 and perdida_maxima > -2:
+        st.success("✅ **STRATEGIA VIABLE** - Valor esperado positivo y riesgo controlado")
+    elif ganancia_promedio > 0:
+        st.warning("⚠️ **STRATEGIA RIESGOSA** - Valor positivo pero pérdidas potenciales altas")
     else:
-        st.error("""
-        **🔴 ESTRATEGIA RIESGOSA**
-        - Pérdidas potenciales altas
-        - No recomendada
-        - Considerar otras odds
-        """)
+        st.error("🔴 **NO RECOMENDADO** - Valor esperado negativo")
+
+# EXPLICACIÓN DE ESCENARIOS
+with st.expander("📖 Explicación de los 7 Escenarios"):
+    st.write("""
+    **1. G1 gana, G2 no coloca** - Solo G1 se coloca (1ro)
+    **2. G2 gana, G1 no coloca** - Solo G2 se coloca (1ro)  
+    **3. G1 2do, G2 gana** - Ambos se colocan (G2 1ro, G1 2do)
+    **4. G2 2do, G1 gana** - Ambos se colocan (G1 1ro, G2 2do)
+    **5. G1 2do, OTRO gana** - G1 se coloca pero otro galgo gana
+    **6. G2 2do, OTRO gana** - G2 se coloca pero otro galgo gana
+    **7. Ambos no colocan** - Ninguno termina 1ro o 2do
+    """)
 
 st.markdown("---")
 st.caption("⚠️ Herramienta educativa - Apueste responsablemente")
