@@ -29,8 +29,6 @@ def calcular_ganancias_reales(a, b, x, y, win1, win2, place1, place2, commission
     G6 = -a - b - x*(place1-1) + y*com_factor           # Otro gana, G1 2do, G2 no coloca
     G7 = -a - b + x*com_factor - y*(place2-1)           # Otro gana, G2 2do, G1 no coloca
     
-    # ¡NO EXISTE "Otro gana, ambos colocan" porque solo hay 2 puestos de colocado!
-    
     return [G1, G2, G3, G4, G5, G6, G7]
 
 def optimizacion_minimizar_perdidas(win1, win2, place1, place2, commission=0.02):
@@ -67,14 +65,14 @@ def optimizacion_minimizar_perdidas(win1, win2, place1, place2, commission=0.02)
     return a, b, best_x, best_y
 
 # INTERFAZ STREAMLIT
-st.set_page_config(page_title="Minimizador de Pérdidas", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="Optimizador con Ajuste", page_icon="🎚️", layout="centered")
 
-st.title("🛡️ Optimizador para MINIMIZAR PÉRDIDAS")
+st.title("🎚️ Optimizador con Ajuste de Stakes en Tiempo Real")
 
-st.info("🎯 **Solo escenarios REALES** - Colocado = 1ro o 2do lugar")
+st.info("💰 **Ajusta todas las stakes con un solo control** - Ve el impacto inmediato")
 
 with st.sidebar:
-    st.header("⚙️ Configuración")
+    st.header("⚙️ Configuración Base")
     
     st.subheader("Odds de los Galgos")
     col1, col2 = st.columns(2)
@@ -90,40 +88,84 @@ with st.sidebar:
     presupuesto = st.number_input("💰 Presupuesto Back ($)", value=2.0, min_value=1.0, step=0.5)
     commission = st.slider("🎯 Comisión Exchange (%)", 0.0, 10.0, 2.0) / 100
 
-# Calcular estrategia
-if st.button("🛡️ Calcular Estrategia Conservadora"):
-    with st.spinner("Buscando stakes que minimicen pérdidas..."):
-        stake_win1, stake_win2, stake_lay1, stake_lay2 = optimizacion_minimizar_perdidas(
+# Calcular estrategia base
+if 'stakes_base' not in st.session_state or st.button("🔄 Calcular Estrategia Base"):
+    with st.spinner("Calculando estrategia óptima base..."):
+        stake_win1_base, stake_win2_base, stake_lay1_base, stake_lay2_base = optimizacion_minimizar_perdidas(
             win1, win2, place1, place2, commission
         )
-        ganancias = calcular_ganancias_reales(
-            stake_win1, stake_win2, stake_lay1, stake_lay2,
-            win1, win2, place1, place2, commission
-        )
+    st.session_state.stakes_base = {
+        'win1': stake_win1_base,
+        'win2': stake_win2_base, 
+        'lay1': stake_lay1_base,
+        'lay2': stake_lay2_base
+    }
+    st.session_state.ganancias_base = calcular_ganancias_reales(
+        stake_win1_base, stake_win2_base, stake_lay1_base, stake_lay2_base,
+        win1, win2, place1, place2, commission
+    )
+
+# CONTROL DE AJUSTE PORCENTUAL
+st.header("🎚️ Ajuste de Stakes en Tiempo Real")
+
+ajuste_porcentaje = st.slider(
+    "📈 Ajustar TODAS las stakes (%)",
+    min_value=-50,
+    max_value=200, 
+    value=0,
+    step=10,
+    help="Aumenta o disminuye todas las stakes por el mismo porcentaje"
+)
+
+# Aplicar ajuste a las stakes base
+if 'stakes_base' in st.session_state:
+    factor_ajuste = 1 + (ajuste_porcentaje / 100)
     
-    # MOSTRAR RESULTADOS
-    st.header("💡 Estrategia para Minimizar Pérdidas")
+    stake_win1_ajustado = st.session_state.stakes_base['win1'] * factor_ajuste
+    stake_win2_ajustado = st.session_state.stakes_base['win2'] * factor_ajuste  
+    stake_lay1_ajustado = st.session_state.stakes_base['lay1'] * factor_ajuste
+    stake_lay2_ajustado = st.session_state.stakes_base['lay2'] * factor_ajuste
+    
+    # Calcular ganancias con stakes ajustadas
+    ganancias_ajustadas = calcular_ganancias_reales(
+        stake_win1_ajustado, stake_win2_ajustado,
+        stake_lay1_ajustado, stake_lay2_ajustado,
+        win1, win2, place1, place2, commission
+    )
+
+    # MOSTRAR RESULTADOS ACTUALIZADOS
+    st.header("💡 Estrategia con Stakes Ajustadas")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
         st.subheader("Back a Ganador")
-        st.metric("Galgo 1", f"${stake_win1:.2f}")
-        st.metric("Galgo 2", f"${stake_win2:.2f}")
+        st.metric("Galgo 1", f"${stake_win1_ajustado:.2f}", 
+                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
+        st.metric("Galgo 2", f"${stake_win2_ajustado:.2f}",
+                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
     
     with col2:
         st.subheader("Lay a Colocado")
-        st.metric("Contra Galgo 1", f"${stake_lay1:.2f}")
-        st.metric("Contra Galgo 2", f"${stake_lay2:.2f}")
+        st.metric("Contra Galgo 1", f"${stake_lay1_ajustado:.2f}",
+                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
+        st.metric("Contra Galgo 2", f"${stake_lay2_ajustado:.2f}", 
+                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
     
     with col3:
-        st.subheader("🛡️ Protección")
-        perdida_max = min(ganancias)
+        st.subheader("📊 Impacto Financiero")
+        inversion_base = (st.session_state.stakes_base['win1'] + st.session_state.stakes_base['win2'] + 
+                         st.session_state.stakes_base['lay1'] + st.session_state.stakes_base['lay2'])
+        inversion_ajustada = (stake_win1_ajustado + stake_win2_ajustado + 
+                             stake_lay1_ajustado + stake_lay2_ajustado)
+        st.metric("Inversión Total", f"${inversion_ajustada:.2f}",
+                 f"{((inversion_ajustada/inversion_base)-1)*100:+.0f}%")
+        
+        perdida_max = min(ganancias_ajustadas)
         st.metric("Pérdida Máxima", f"${perdida_max:.3f}")
-        st.metric("Escenarios Total", f"{len(ganancias)}")
-    
-    # TABLA DE ESCENARIOS REALES
-    st.subheader("📈 Escenarios REALES de Colocado (1ro y 2do)")
+
+    # TABLA DE ESCENARIOS ACTUALIZADA
+    st.subheader("📈 Escenarios Reales - Con Stakes Ajustadas")
     
     escenarios_reales = [
         "G1 gana, G2 no coloca",
@@ -133,53 +175,64 @@ if st.button("🛡️ Calcular Estrategia Conservadora"):
         "Ambos no colocan",
         "OTRO gana, G1 2do, G2 no coloca",
         "OTRO gana, G2 2do, G1 no coloca"
-        # ¡NO EXISTE "Otro gana, ambos colocan"!
     ]
     
-    resultados = []
-    for i, (esc, gan) in enumerate(zip(escenarios_reales, ganancias)):
-        resultados.append({
+    resultados_ajustados = []
+    for i, (esc, gan) in enumerate(zip(escenarios_reales, ganancias_ajustadas)):
+        # Calcular cambio vs base
+        gan_base = st.session_state.ganancias_base[i]
+        cambio_porcentual = ((gan - gan_base) / abs(gan_base)) * 100 if gan_base != 0 else 0
+        
+        resultados_ajustados.append({
             'Escenario': esc,
             'Ganancia/Neta': f"${gan:.3f}",
+            'Cambio vs Base': f"{cambio_porcentual:+.1f}%" if ajuste_porcentaje != 0 else "0%",
             'Resultado': "✅ Ganancia" if gan >= 0 else "⚠️ Pérdida"
         })
     
-    st.table(pd.DataFrame(resultados))
+    st.table(pd.DataFrame(resultados_ajustados))
+
+    # COMPARACIÓN LADO A LADO
+    st.subheader("🔄 Comparación: Base vs Ajustada")
     
-    # ANÁLISIS DE RIESGO
-    st.subheader("📊 Análisis de Riesgo Real")
-    
-    perdidas = [g for g in ganancias if g < 0]
-    ganancias_positivas = [g for g in ganancias if g >= 0]
-    
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
-        st.metric("Escenarios con Pérdida", f"{len(perdidas)}/{len(ganancias)}")
+        st.write("**🏠 Stakes Base (100%)**")
+        st.write(f"- Back G1: ${st.session_state.stakes_base['win1']:.2f}")
+        st.write(f"- Back G2: ${st.session_state.stakes_base['win2']:.2f}")
+        st.write(f"- Lay G1: ${st.session_state.stakes_base['lay1']:.2f}")
+        st.write(f"- Lay G2: ${st.session_state.stakes_base['lay2']:.2f}")
+        st.write(f"**Pérdida máxima:** ${min(st.session_state.ganancias_base):.3f}")
     
     with col2:
-        st.metric("Escenarios con Ganancia", f"{len(ganancias_positivas)}/{len(ganancias)}")
-    
-    with col3:
-        if ganancias_positivas:
-            ratio = abs(min(ganancias)) / max(ganancias_positivas) if max(ganancias_positivas) > 0 else 0
-            st.metric("Ratio Riesgo/Beneficio", f"{ratio:.2f}:1")
-    
-    # EXPLICACIÓN DE ESCENARIOS
-    with st.expander("🔍 Explicación de Escenarios Reales"):
+        st.write(f"**🎯 Stakes Ajustadas ({100+ajuste_porcentaje}%)**")
+        st.write(f"- Back G1: ${stake_win1_ajustado:.2f}")
+        st.write(f"- Back G2: ${stake_win2_ajustado:.2f}") 
+        st.write(f"- Lay G1: ${stake_lay1_ajustado:.2f}")
+        st.write(f"- Lay G2: ${stake_lay2_ajustado:.2f}")
+        st.write(f"**Pérdida máxima:** ${min(ganancias_ajustadas):.3f}")
+
+    # GUÍA DE AJUSTE
+    with st.expander("💡 Guía de Ajuste de Stakes"):
         st.write("""
-        **Colocado = 1ro O 2do lugar (solo 2 puestos)**
+        **🔽 Disminuir stakes (-50% a 0%):**
+        - ✅ Menor inversión total
+        - ✅ Menor riesgo absoluto  
+        - ❌ Menores ganancias potenciales
+        - ❌ Pérdidas más frecuentes en escenarios marginales
         
-        - **G1 gana, G2 no coloca**: G1 es 1ro, G2 es 3ro-6to
-        - **G2 gana, G1 no coloca**: G2 es 1ro, G1 es 3ro-6to  
-        - **G1 2do, G2 gana**: G2 es 1ro, G1 es 2do
-        - **G2 2do, G1 gana**: G1 es 1ro, G2 es 2do
-        - **Ambos no colocan**: G1 y G2 son 3ro-6to
-        - **OTRO gana, G1 2do, G2 no coloca**: Otro galgo es 1ro, G1 es 2do, G2 es 3ro-6to
-        - **OTRO gana, G2 2do, G1 no coloca**: Otro galgo es 1ro, G2 es 2do, G1 es 3ro-6to
+        **🔼 Aumentar stakes (0% a +200%):**
+        - ✅ Mayores ganancias en escenarios favorables
+        - ✅ Mejor protección en escenarios desfavorables
+        - ❌ Mayor inversión requerida
+        - ❌ Pérdidas más grandes si ocurren escenarios negativos
         
-        **❌ NO EXISTE**: "Otro gana, ambos colocan" porque solo hay 2 puestos de colocado
+        **Recomendación:** Empieza con la estrategia base (0%) y ajusta según tu tolerancia al riesgo.
         """)
+
+else:
+    st.warning("⚠️ Primero calcula la estrategia base haciendo click en 'Calcular Estrategia Base'")
 
 st.markdown("---")
 st.caption("⚠️ Herramienta educativa - Apueste responsablemente")
