@@ -2,51 +2,75 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-def optimizacion_simple_confiable(win1, win2, place1, place2, commission=0.02):
+def calcular_valor_y_stakes(win1, win2, place1, place2, commission=0.02):
     """
-    Optimización SIMPLE y CONFIABLE basada en cálculo directo
+    Enfoque CORRECTO: calcular valor y ajustar stakes Back primero
     """
-    a, b = 1.0, 1.0  # Stakes fijos a ganador
-    com_factor = 1 - commission
+    # Probabilidades teóricas (6 galgos iguales)
+    prob_teorica_ganar = 1/6
+    prob_teorica_colocado = 1/3
     
-    # PARA ODDS SIMILARES: stakes similares
-    if abs(win1 - win2) < 0.5 and abs(place1 - place2) < 0.3:
-        # Odds similares -> stakes Lay similares
-        base_stake = 1.5  # Base para odds equilibradas
-        return base_stake, base_stake
+    # Probabilidades implícitas del mercado
+    prob_impl_win1 = 1 / win1
+    prob_impl_win2 = 1 / win2
+    prob_impl_place1 = 1 / place1
+    prob_impl_place2 = 1 / place2
     
-    # PARA ODDS DIFERENTES: cálculo directo
-    else:
-        # Galgo con menor odd a colocado = más probable que se coloque
-        if place1 < place2:
-            # G1 más probable -> más stake Lay en G1
-            stake_lay1 = 1.8
-            stake_lay2 = 0.8
+    # Calcular VALOR (prob_teorica / prob_implícita)
+    valor_win1 = prob_teorica_ganar / prob_impl_win1
+    valor_win2 = prob_teorica_ganar / prob_impl_win2
+    valor_place1 = prob_teorica_colocado / prob_impl_place1
+    valor_place2 = prob_teorica_colocado / prob_impl_place2
+    
+    # DECIDIR APUESTAS BACK solo si tienen valor
+    back_stake1, back_stake2 = 0, 0
+    
+    if valor_win1 > 1:  # Tiene valor positivo
+        back_stake1 = min(valor_win1, 2.0)  # Stake proporcional al valor
+    if valor_win2 > 1:
+        back_stake2 = min(valor_win2, 2.0)
+    
+    # Si ninguno tiene valor, usar el menos malo
+    if back_stake1 == 0 and back_stake2 == 0:
+        if valor_win1 > valor_win2:
+            back_stake1 = 1.0
         else:
-            # G2 más probable -> más stake Lay en G2
-            stake_lay1 = 0.8
-            stake_lay2 = 1.8
+            back_stake2 = 1.0
     
-    return stake_lay1, stake_lay2
+    return back_stake1, back_stake2, valor_win1, valor_win2
 
-def calcular_ganancias(a, b, x, y, win1, win2, place1, place2, commission=0.02):
-    """Calcula ganancias para todos los escenarios"""
+def optimizar_completo(win1, win2, place1, place2, commission=0.02):
+    """
+    Optimización COMPLETA: valor + stakes Back + stakes Lay
+    """
+    # 1. Calcular stakes Back basados en valor
+    back_stake1, back_stake2, valor1, valor2 = calcular_valor_y_stakes(win1, win2, place1, place2, commission)
+    
+    # 2. Calcular stakes Lay óptimos para esos stakes Back
     com_factor = 1 - commission
     
-    G1 = a*(win1-1) - b - x*(place1-1) + y*com_factor
-    G2 = -a + b*(win2-1) + x*com_factor - y*(place2-1)
-    G3 = -a + b*(win2-1) - x*(place1-1) - y*(place2-1)
-    G4 = a*(win1-1) - b - x*(place1-1) - y*(place2-1)
-    G5 = -a - b + x*com_factor + y*com_factor
+    # Estimación simple de stakes Lay
+    if back_stake1 > 0 and back_stake2 > 0:
+        # Apostando a ambos -> stakes Lay balanceados
+        lay_stake1 = 1.5
+        lay_stake2 = 1.5
+    elif back_stake1 > 0:
+        # Solo apostando a G1 -> más Lay en G2
+        lay_stake1 = 0.8
+        lay_stake2 = 1.8
+    else:
+        # Solo apostando a G2 -> más Lay en G1  
+        lay_stake1 = 1.8
+        lay_stake2 = 0.8
     
-    return [G1, G2, G3, G4, G5]
+    return back_stake1, back_stake2, lay_stake1, lay_stake2, valor1, valor2
 
-# INTERFAZ STREAMLIT
-st.set_page_config(page_title="Optimizador Simple", page_icon="🏁", layout="centered")
+# INTERFAZ STREAMLIT MEJORADA
+st.set_page_config(page_title="Optimizador con Valor", page_icon="🏁", layout="centered")
 
-st.title("🏁 Optimizador SIMPLE y Confiable")
+st.title("🏁 Optimizador CON VALOR Real")
 
-st.info("🎯 **Cálculo directo** - Sin algoritmos complejos que fallen")
+st.info("💰 **Ahora considera VALOR** - Stakes Back proporcionales al valor encontrado")
 
 # Entrada de datos
 st.header("📊 Odds de los Galgos")
@@ -55,80 +79,77 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Galgo 1")
-    win1 = st.number_input("Odd a Ganar", value=2.70, min_value=1.0, key="win1")
-    place1 = st.number_input("Odd a Colocado", value=1.60, min_value=1.0, key="place1")
+    win1 = st.number_input("Odd a Ganar", value=6.00, min_value=1.0, key="win1")
+    place1 = st.number_input("Odd a Colocado", value=2.50, min_value=1.0, key="place1")
 
 with col2:
     st.subheader("Galgo 2")  
-    win2 = st.number_input("Odd a Ganar", value=2.70, min_value=1.0, key="win2")
-    place2 = st.number_input("Odd a Colocado", value=1.60, min_value=1.0, key="place2")
+    win2 = st.number_input("Odd a Ganar", value=2.00, min_value=1.0, key="win2")
+    place2 = st.number_input("Odd a Colocado", value=1.40, min_value=1.0, key="place2")
 
 commission = st.slider("🎯 Comisión del Exchange (%)", 0.0, 10.0, 2.0) / 100
 
-if st.button("🎲 Calcular Stakes Sencillos", type="primary"):
-    stake_lay1, stake_lay2 = optimizacion_simple_confiable(win1, win2, place1, place2, commission)
-    ganancias = calcular_ganancias(1.0, 1.0, stake_lay1, stake_lay2, win1, win2, place1, place2, commission)
+if st.button("🎲 Optimizar con VALOR", type="primary"):
+    back_stake1, back_stake2, lay_stake1, lay_stake2, valor1, valor2 = optimizar_completo(win1, win2, place1, place2, commission)
     
-    # MOSTRAR RESULTADOS
-    st.header("💡 Estrategia Recomendada")
+    # MOSTRAR ANÁLISIS DE VALOR
+    st.header("🔍 Análisis de Valor")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Galgo 1")
+        st.metric("Odd Ganar", f"{win1:.2f}")
+        st.metric("Valor", f"{valor1:.2f}")
+        st.metric("Recomendación", "✅ APOSTAR" if valor1 > 1 else "❌ EVITAR")
+    
+    with col2:
+        st.subheader("Galgo 2")
+        st.metric("Odd Ganar", f"{win2:.2f}") 
+        st.metric("Valor", f"{valor2:.2f}")
+        st.metric("Recomendación", "✅ APOSTAR" if valor2 > 1 else "❌ EVITAR")
+    
+    # ESTRATEGIA FINAL
+    st.header("💡 Estrategia Optimizada con VALOR")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("Apuestas a Ganador")
-        st.metric("Galgo 1", f"$1.00 @ {win1:.2f}")
-        st.metric("Galgo 2", f"$1.00 @ {win2:.2f}")
+        if back_stake1 > 0:
+            st.metric("Galgo 1", f"${back_stake1:.2f} @ {win1:.2f}")
+        else:
+            st.write("Galgo 1: ❌ No apostar")
+            
+        if back_stake2 > 0:
+            st.metric("Galgo 2", f"${back_stake2:.2f} @ {win2:.2f}")
+        else:
+            st.write("Galgo 2: ❌ No apostar")
     
     with col2:
-        st.subheader("Lay a Colocado") 
-        st.metric("Contra Galgo 1", f"${stake_lay1:.2f}")
-        st.metric("Contra Galgo 2", f"${stake_lay2:.2f}")
-    
-    # TABLA DE ESCENARIOS
-    st.subheader("📈 Resultados por Escenario")
-    
-    escenarios = [
-        "G1 gana, G2 no coloca",
-        "G2 gana, G1 no coloca", 
-        "G1 2do, G2 gana",
-        "G2 2do, G1 gana",
-        "Ambos no colocan"
-    ]
-    
-    resultados = []
-    for i, (esc, gan) in enumerate(zip(escenarios, ganancias)):
-        resultados.append({
-            'Escenario': esc,
-            'Ganancia/Neta': f"${gan:.3f}",
-            'Resultado': "✅ Ganancia" if gan >= 0 else "⚠️ Pérdida"
-        })
-    
-    df_resultados = pd.DataFrame(resultados)
-    st.table(df_resultados)
-    
-    # REGLAS APLICADAS
-    st.subheader("🔧 Reglas Aplicadas")
-    
-    if abs(win1 - win2) < 0.5 and abs(place1 - place2) < 0.3:
-        st.write("✅ **Odds similares** → Stakes Lay similares ($1.50 cada uno)")
-    elif place1 < place2:
-        st.write("✅ **Galgo 1 más probable** → Más Lay en G1 ($1.80) vs G2 ($0.80)")
-    else:
-        st.write("✅ **Galgo 2 más probable** → Más Lay en G2 ($1.80) vs G1 ($0.80)")
+        st.subheader("Lay a Colocado")
+        st.metric("Contra Galgo 1", f"${lay_stake1:.2f}")
+        st.metric("Contra Galgo 2", f"${lay_stake2:.2f}")
 
-# PLANTILLAS PREDEFINIDAS
-with st.expander("🎯 Plantillas para Casos Comunes"):
+# EXPLICACIÓN
+with st.expander("📚 ¿Cómo se calcula el VALOR?"):
     st.write("""
-    **Para odds iguales (ej: 2.70/2.70):**
-    - Lay Galgo 1: $1.50
-    - Lay Galgo 2: $1.50
+    **Fórmula de valor:**
+    ```
+    VALOR = Probabilidad Teórica / Probabilidad Implícita
+    ```
     
-    **Para un favorito y un externo (ej: 2.20/8.00):**
-    - Lay Favorito: $1.80
-    - Lay Externo: $0.80
+    **Donde:**
+    - Probabilidad Teórica = 16.67% (ganar) o 33.33% (colocado)  
+    - Probabilidad Implícita = 1 / Odd
     
-    **Para dos galgos competitivos (ej: 3.50/4.00):**  
-    - Lay Ambos: $1.20 - $1.50
+    **Interpretación:**
+    - VALOR > 1.0 = Buena apuesta ✅
+    - VALOR < 1.0 = Mala apuesta ❌
+    
+    **Ejemplo con odds 6.00 vs 2.00:**
+    - Odd 6.00: VALOR = 16.67% / (1/6) = 1.0 → Valor neutral
+    - Odd 2.00: VALOR = 16.67% / 50% = 0.33 → Pésimo valor
     """)
 
 st.markdown("---")
