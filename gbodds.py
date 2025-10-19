@@ -1,238 +1,271 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from itertools import combinations
 
-def calcular_stakes_ganador(win1, win2, presupuesto_total=2.0):
-    """Prorratea los stakes a ganador según las odds"""
-    if abs(win1 - win2) < 0.01:
-        return presupuesto_total / 2, presupuesto_total / 2
-    else:
-        inv1 = 1 / win1
-        inv2 = 1 / win2
-        total_inv = inv1 + inv2
-        stake1 = (inv1 / total_inv) * presupuesto_total
-        stake2 = (inv2 / total_inv) * presupuesto_total
-        return stake1, stake2
+def calcular_probabilidades(odds, total_colocados):
+    """Convertir odds a probabilidades implícitas y normalizar"""
+    prob_raw = [1/o for o in odds]
+    total_prob = sum(prob_raw)
+    factor_normalizacion = total_colocados / total_prob
+    prob_ajustada = [p * factor_normalizacion for p in prob_raw]
+    return prob_ajustada
 
-def calcular_ganancias_reales(a, b, x, y, win1, win2, place1, place2, commission=0.02):
-    """Calcula ganancias SOLO para escenarios REALES de colocado (1ro y 2do)"""
-    com_factor = 1 - commission
+def calcular_stakes_optimos(odds, excluir_idx, bankroll=100, total_colocados=2):
+    """Calcular stakes óptimos considerando el riesgo"""
+    n_perros = len(odds)
+    perros_lay = [i for i in range(n_perros) if i != excluir_idx]
     
-    # ESCENARIOS REALES - COLOCADO = 1ro O 2do lugar
-    G1 = a*(win1-1) - b - x*(place1-1) + y*com_factor  # G1 gana, G2 no coloca
-    G2 = -a + b*(win2-1) + x*com_factor - y*(place2-1)  # G2 gana, G1 no coloca
-    G3 = -a + b*(win2-1) - x*(place1-1) - y*(place2-1)  # G1 2do, G2 gana
-    G4 = a*(win1-1) - b - x*(place1-1) - y*(place2-1)   # G2 2do, G1 gana
-    G5 = -a - b + x*com_factor + y*com_factor           # Ambos no colocan
+    # Calcular stakes proporcionales al riesgo
+    stakes = []
+    for perro in perros_lay:
+        # Stake inversamente proporcional a (odds-1) - mayor riesgo, menor stake
+        stake_base = bankroll / (odds[perro] - 0.5)
+        stakes.append(stake_base)
     
-    # ESCENARIOS CON OTRO GANADOR - solo 2do lugar cuenta como colocado
-    G6 = -a - b - x*(place1-1) + y*com_factor           # Otro gana, G1 2do, G2 no coloca
-    G7 = -a - b + x*com_factor - y*(place2-1)           # Otro gana, G2 2do, G1 no coloca
+    # Normalizar para que sumen el bankroll deseado
+    total_stakes = sum(stakes)
+    stakes = [s * bankroll / total_stakes for s in stakes]
     
-    return [G1, G2, G3, G4, G5, G6, G7]
+    return dict(zip(perros_lay, stakes))
 
-def optimizacion_minimizar_perdidas(win1, win2, place1, place2, commission=0.02):
-    """Optimización ESPECÍFICA para MINIMIZAR PÉRDIDAS"""
-    a, b = calcular_stakes_ganador(win1, win2)
+def analizar_escenario_completo(odds, excluir_idx, bankroll=100, total_colocados=2):
+    """Analizar completamente un escenario de exclusión"""
+    prob_ajustada = calcular_probabilidades(odds, total_colocados)
+    n_perros = len(odds)
+    perros_lay = [i for i in range(n_perros) if i != excluir_idx]
+    stakes = calcular_stakes_optimos(odds, excluir_idx, bankroll, total_colocados)
     
-    # Calcular probabilidades para guess inicial
-    prob_place1 = 1 / place1
-    prob_place2 = 1 / place2
+    escenarios = []
+    ev_total = 0
     
-    # GUESS INICIAL CONSERVADOR
-    if prob_place1 > prob_place2:
-        guess_x = min(prob_place1 * 2.0, 1.5)
-        guess_y = max(prob_place2 * 0.8, 0.4)
-    else:
-        guess_x = max(prob_place1 * 0.8, 0.4)
-        guess_y = min(prob_place2 * 2.0, 1.5)
-    
-    best_x, best_y = guess_x, guess_y
-    best_perdida_max = float('inf')
-    
-    # BÚSQUEDA PARA MINIMIZAR PÉRDIDA MÁXIMA
-    for x in np.arange(0.3, 2.5, 0.05):
-        for y in np.arange(0.3, 2.5, 0.05):
-            ganancias = calcular_ganancias_reales(a, b, x, y, win1, win2, place1, place2, commission)
-            
-            perdida_max = min(ganancias)  # Lo que queremos minimizar
-            
-            # CRITERIO: minimizar pérdida máxima
-            if perdida_max > best_perdida_max:
-                best_perdida_max = perdida_max
-                best_x, best_y = x, y
-    
-    return a, b, best_x, best_y
-
-# INTERFAZ STREAMLIT
-st.set_page_config(page_title="Optimizador con Ajuste", page_icon="🎚️", layout="centered")
-
-st.title("🎚️ Optimizador con Ajuste de Stakes en Tiempo Real")
-
-st.info("💰 **Ajusta todas las stakes con un solo control** - Ve el impacto inmediato")
-
-with st.sidebar:
-    st.header("⚙️ Configuración Base")
-    
-    st.subheader("Odds de los Galgos")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        win1 = st.number_input("G1 - Ganar", value=4.2, min_value=1.0, key="win1")
-        place1 = st.number_input("G1 - Colocado", value=2.2, min_value=1.0, key="place1")
-    
-    with col2:
-        win2 = st.number_input("G2 - Ganar", value=5.2, min_value=1.0, key="win2")  
-        place2 = st.number_input("G2 - Colocado", value=2.2, min_value=1.0, key="place2")
-    
-    presupuesto = st.number_input("💰 Presupuesto Back ($)", value=2.0, min_value=1.0, step=0.5)
-    commission = st.slider("🎯 Comisión Exchange (%)", 0.0, 10.0, 2.0) / 100
-
-# Calcular estrategia base
-if 'stakes_base' not in st.session_state or st.button("🔄 Calcular Estrategia Base"):
-    with st.spinner("Calculando estrategia óptima base..."):
-        stake_win1_base, stake_win2_base, stake_lay1_base, stake_lay2_base = optimizacion_minimizar_perdidas(
-            win1, win2, place1, place2, commission
-        )
-    st.session_state.stakes_base = {
-        'win1': stake_win1_base,
-        'win2': stake_win2_base, 
-        'lay1': stake_lay1_base,
-        'lay2': stake_lay2_base
-    }
-    st.session_state.ganancias_base = calcular_ganancias_reales(
-        stake_win1_base, stake_win2_base, stake_lay1_base, stake_lay2_base,
-        win1, win2, place1, place2, commission
-    )
-
-# CONTROL DE AJUSTE PORCENTUAL
-st.header("🎚️ Ajuste de Stakes en Tiempo Real")
-
-ajuste_porcentaje = st.slider(
-    "📈 Ajustar TODAS las stakes (%)",
-    min_value=-50,
-    max_value=200, 
-    value=0,
-    step=10,
-    help="Aumenta o disminuye todas las stakes por el mismo porcentaje"
-)
-
-# Aplicar ajuste a las stakes base
-if 'stakes_base' in st.session_state:
-    factor_ajuste = 1 + (ajuste_porcentaje / 100)
-    
-    stake_win1_ajustado = st.session_state.stakes_base['win1'] * factor_ajuste
-    stake_win2_ajustado = st.session_state.stakes_base['win2'] * factor_ajuste  
-    stake_lay1_ajustado = st.session_state.stakes_base['lay1'] * factor_ajuste
-    stake_lay2_ajustado = st.session_state.stakes_base['lay2'] * factor_ajuste
-    
-    # Calcular ganancias con stakes ajustadas
-    ganancias_ajustadas = calcular_ganancias_reales(
-        stake_win1_ajustado, stake_win2_ajustado,
-        stake_lay1_ajustado, stake_lay2_ajustado,
-        win1, win2, place1, place2, commission
-    )
-
-    # MOSTRAR RESULTADOS ACTUALIZADOS
-    st.header("💡 Estrategia con Stakes Ajustadas")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.subheader("Back a Ganador")
-        st.metric("Galgo 1", f"${stake_win1_ajustado:.2f}", 
-                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-        st.metric("Galgo 2", f"${stake_win2_ajustado:.2f}",
-                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-    
-    with col2:
-        st.subheader("Lay a Colocado")
-        st.metric("Contra Galgo 1", f"${stake_lay1_ajustado:.2f}",
-                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-        st.metric("Contra Galgo 2", f"${stake_lay2_ajustado:.2f}", 
-                 f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-    
-    with col3:
-        st.subheader("📊 Impacto Financiero")
-        inversion_base = (st.session_state.stakes_base['win1'] + st.session_state.stakes_base['win2'] + 
-                         st.session_state.stakes_base['lay1'] + st.session_state.stakes_base['lay2'])
-        inversion_ajustada = (stake_win1_ajustado + stake_win2_ajustado + 
-                             stake_lay1_ajustado + stake_lay2_ajustado)
-        st.metric("Inversión Total", f"${inversion_ajustada:.2f}",
-                 f"{((inversion_ajustada/inversion_base)-1)*100:+.0f}%")
+    # Generar todas las combinaciones de perros colocados
+    for colocados in combinations(range(n_perros), total_colocados):
+        resultado_total = 0
+        detalle_stakes = {}
         
-        perdida_max = min(ganancias_ajustadas)
-        st.metric("Pérdida Máxima", f"${perdida_max:.3f}")
-
-    # TABLA DE ESCENARIOS ACTUALIZADA
-    st.subheader("📈 Escenarios Reales - Con Stakes Ajustadas")
-    
-    escenarios_reales = [
-        "G1 gana, G2 no coloca",
-        "G2 gana, G1 no coloca", 
-        "G1 2do, G2 gana",
-        "G2 2do, G1 gana",
-        "Ambos no colocan",
-        "OTRO gana, G1 2do, G2 no coloca",
-        "OTRO gana, G2 2do, G1 no coloca"
-    ]
-    
-    resultados_ajustados = []
-    for i, (esc, gan) in enumerate(zip(escenarios_reales, ganancias_ajustadas)):
-        # Calcular cambio vs base
-        gan_base = st.session_state.ganancias_base[i]
-        cambio_porcentual = ((gan - gan_base) / abs(gan_base)) * 100 if gan_base != 0 else 0
+        for perro in perros_lay:
+            stake = stakes[perro]
+            if perro in colocados:
+                # Pierdes el lay: pagas (odds[perro] - 1) * stake
+                perdida = (odds[perro] - 1) * stake
+                resultado_total -= perdida
+                detalle_stakes[perro+1] = f"-{perdida:.1f}"
+            else:
+                # Ganas el lay: ganas stake
+                resultado_total += stake
+                detalle_stakes[perro+1] = f"+{stake:.1f}"
         
-        resultados_ajustados.append({
-            'Escenario': esc,
-            'Ganancia/Neta': f"${gan:.3f}",
-            'Cambio vs Base': f"{cambio_porcentual:+.1f}%" if ajuste_porcentaje != 0 else "0%",
-            'Resultado': "✅ Ganancia" if gan >= 0 else "⚠️ Pérdida"
+        # Calcular probabilidad de esta combinación (aproximada)
+        prob_combinacion = 1.0
+        temp_prob = prob_ajustada.copy()
+        
+        for i, perro in enumerate(colocados):
+            if i == 0:
+                prob_combinacion *= temp_prob[perro]
+            else:
+                # Probabilidad condicional simplificada
+                prob_restante = total_colocados - i
+                prob_combinacion *= (temp_prob[perro] / sum(temp_prob))
+        
+        contribucion_ev = resultado_total * prob_combinacion
+        ev_total += contribucion_ev
+        
+        escenarios.append({
+            'Perros_Colocados': ' y '.join(str(c+1) for c in colocados),
+            'Probabilidad': prob_combinacion,
+            'Resultado_Total': resultado_total,
+            'Contribucion_EV': contribucion_ev,
+            **detalle_stakes
         })
     
-    st.table(pd.DataFrame(resultados_ajustados))
+    return {
+        'ev_total': ev_total,
+        'stakes': stakes,
+        'escenarios': pd.DataFrame(escenarios)
+    }
 
-    # COMPARACIÓN LADO A LADO
-    st.subheader("🔄 Comparación: Base vs Ajustada")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write("**🏠 Stakes Base (100%)**")
-        st.write(f"- Back G1: ${st.session_state.stakes_base['win1']:.2f}")
-        st.write(f"- Back G2: ${st.session_state.stakes_base['win2']:.2f}")
-        st.write(f"- Lay G1: ${st.session_state.stakes_base['lay1']:.2f}")
-        st.write(f"- Lay G2: ${st.session_state.stakes_base['lay2']:.2f}")
-        st.write(f"**Pérdida máxima:** ${min(st.session_state.ganancias_base):.3f}")
-    
-    with col2:
-        st.write(f"**🎯 Stakes Ajustadas ({100+ajuste_porcentaje}%)**")
-        st.write(f"- Back G1: ${stake_win1_ajustado:.2f}")
-        st.write(f"- Back G2: ${stake_win2_ajustado:.2f}") 
-        st.write(f"- Lay G1: ${stake_lay1_ajustado:.2f}")
-        st.write(f"- Lay G2: ${stake_lay2_ajustado:.2f}")
-        st.write(f"**Pérdida máxima:** ${min(ganancias_ajustadas):.3f}")
+# Configuración de la aplicación
+st.set_page_config(page_title="Análisis Lay Galgos", layout="wide")
+st.title("📊 Analizador Completo de Estrategia Lay")
+st.markdown("**Estrategia**: Lay a N-1 galgos - Stake Óptimo y Análisis por Escenario")
 
-    # GUÍA DE AJUSTE
-    with st.expander("💡 Guía de Ajuste de Stakes"):
-        st.write("""
-        **🔽 Disminuir stakes (-50% a 0%):**
-        - ✅ Menor inversión total
-        - ✅ Menor riesgo absoluto  
-        - ❌ Menores ganancias potenciales
-        - ❌ Pérdidas más frecuentes en escenarios marginales
-        
-        **🔼 Aumentar stakes (0% a +200%):**
-        - ✅ Mayores ganancias en escenarios favorables
-        - ✅ Mejor protección en escenarios desfavorables
-        - ❌ Mayor inversión requerida
-        - ❌ Pérdidas más grandes si ocurren escenarios negativos
-        
-        **Recomendación:** Empieza con la estrategia base (0%) y ajusta según tu tolerancia al riesgo.
-        """)
+# Entrada de datos flexible
+st.header("🎯 Configuración Flexible")
 
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Parámetros de la Carrera")
+    n_competidores = st.number_input("Número de competidores", min_value=3, max_value=8, value=6, step=1)
+    total_colocados = st.number_input("Número que se colocan", min_value=1, max_value=n_competidores-1, value=2, step=1)
+    bankroll = st.number_input("Bankroll Total", min_value=10, value=100, step=10)
+
+with col2:
+    st.subheader("Odds de los Competidores")
+    st.markdown(f"Ingresa las odds para los {n_competidores} competidores:")
+    
+    odds = []
+    default_odds = [1.64, 2.28, 2.68, 7.8, 36.0, 2.24, 4.0, 5.0]  # Extendido para hasta 8
+    
+    for i in range(n_competidores):
+        odds.append(st.number_input(f"Box {i+1}", min_value=1.01, 
+                                  value=default_odds[i], 
+                                  step=0.01, key=f"odds_{i}"))
+
+# Selección de análisis
+st.subheader("🔍 Tipo de Análisis")
+analisis_tipo = st.radio("Selecciona el tipo de análisis:", 
+                         ["Comparar todas las exclusiones", "Análisis detallado de una exclusión"])
+
+if analisis_tipo == "Análisis detallado de una exclusión":
+    excluir_especifico = st.selectbox("Excluir Box:", 
+                                     [f"Box {i+1}" for i in range(n_competidores)])
 else:
-    st.warning("⚠️ Primero calcula la estrategia base haciendo click en 'Calcular Estrategia Base'")
+    excluir_especifico = None
 
-st.markdown("---")
-st.caption("⚠️ Herramienta educativa - Apueste responsablemente")
+if st.button("🔍 Calcular Análisis Completo"):
+    # Validación
+    if total_colocados >= n_competidores:
+        st.error("❌ El número de colocados debe ser menor que el número de competidores")
+        st.stop()
+    
+    # Análisis general de todos los escenarios
+    st.header("📈 Resumen General - Comparación de Estrategias")
+    
+    resultados_generales = []
+    for excluir in range(n_competidores):
+        analisis = analizar_escenario_completo(odds, excluir, bankroll, total_colocados)
+        stakes = analisis['stakes']
+        
+        resultado = {
+            'Excluir_Box': excluir + 1,
+            'Odds_Excluido': odds[excluir],
+            'EV_Total': analisis['ev_total'],
+            'ROI': (analisis['ev_total'] / bankroll) * 100,
+            'Stake_Total': sum(stakes.values())
+        }
+        
+        # Agregar stakes individuales
+        for perro, stake in stakes.items():
+            resultado[f'Stake_Box_{perro+1}'] = stake
+        
+        resultados_generales.append(resultado)
+    
+    df_general = pd.DataFrame(resultados_generales)
+    df_general['EV_Total'] = df_general['EV_Total'].round(2)
+    df_general['ROI'] = df_general['ROI'].round(2)
+    
+    # Resaltar mejor estrategia
+    def highlight_max(s):
+        is_max = s == s.max()
+        return ['background-color: #90EE90' if v else '' for v in is_max]
+    
+    st.dataframe(df_general.style.apply(highlight_max, subset=['EV_Total']), 
+                use_container_width=True)
+    
+    # Mostrar mejor estrategia
+    mejor_idx = df_general['EV_Total'].idxmax()
+    mejor_box = int(df_general.loc[mejor_idx, 'Excluir_Box'])
+    st.success(f"✅ **Mejor estrategia**: Excluir Box {mejor_box} - EV: {df_general.loc[mejor_idx, 'EV_Total']:.2f} (ROI: {df_general.loc[mejor_idx, 'ROI']:.2f}%)")
+    
+    # Análisis detallado
+    st.header("📊 Análisis Detallado")
+    
+    if analisis_tipo == "Comparar todas las exclusiones":
+        # Mostrar todos los escenarios en tabs
+        tabs = st.tabs([f"Excluir Box {i+1}" for i in range(n_competidores)])
+        
+        for i, tab in enumerate(tabs):
+            with tab:
+                analisis = analizar_escenario_completo(odds, i, bankroll, total_colocados)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader(f"💰 Stakes Recomendados")
+                    stakes_df = pd.DataFrame([
+                        {'Box': perro+1, 'Stake': stake, 'Odds': odds[perro]}
+                        for perro, stake in analisis['stakes'].items()
+                    ])
+                    stakes_df['Stake'] = stakes_df['Stake'].round(2)
+                    st.dataframe(stakes_df, use_container_width=True)
+                
+                with col2:
+                    st.subheader("📈 Métricas")
+                    ev = analisis['ev_total']
+                    roi = (ev / bankroll) * 100
+                    st.metric("EV Total", f"{ev:.2f}")
+                    st.metric("ROI", f"{roi:.2f}%")
+                    st.metric("Número de Escenarios", len(analisis['escenarios']))
+                
+                st.subheader(f"🎯 Escenarios Posibles ({len(analisis['escenarios'])} combinaciones)")
+                df_escenarios = analisis['escenarios']
+                df_escenarios['Probabilidad'] = (df_escenarios['Probabilidad'] * 100).round(2)
+                df_escenarios['Resultado_Total'] = df_escenarios['Resultado_Total'].round(2)
+                df_escenarios['Contribucion_EV'] = df_escenarios['Contribucion_EV'].round(2)
+                
+                st.dataframe(df_escenarios, use_container_width=True)
+    
+    else:
+        # Mostrar solo el escenario específico seleccionado
+        excluir_idx = int(excluir_especifico.split(" ")[1]) - 1
+        analisis = analizar_escenario_completo(odds, excluir_idx, bankroll, total_colocados)
+        
+        st.subheader(f"📋 Resumen - Excluyendo Box {excluir_idx + 1}")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("💰 Stakes Recomendados")
+            stakes_df = pd.DataFrame([
+                {'Box': perro+1, 'Stake': stake, 'Odds': odds[perro], 'Riesgo_Max': (odds[perro]-1)*stake}
+                for perro, stake in analisis['stakes'].items()
+            ])
+            stakes_df['Stake'] = stakes_df['Stake'].round(2)
+            stakes_df['Riesgo_Max'] = stakes_df['Riesgo_Max'].round(2)
+            st.dataframe(stakes_df, use_container_width=True)
+            
+            total_stake = stakes_df['Stake'].sum()
+            max_riesgo = stakes_df['Riesgo_Max'].max()
+            st.info(f"**Total Stake:** {total_stake:.2f} | **Máximo Riesgo Individual:** {max_riesgo:.2f}")
+        
+        with col2:
+            st.subheader("📈 Métricas Clave")
+            col2_1, col2_2 = st.columns(2)
+            with col2_1:
+                st.metric("EV Total", f"{analisis['ev_total']:.2f}")
+                st.metric("ROI", f"{(analisis['ev_total']/bankroll)*100:.2f}%")
+            with col2_2:
+                st.metric("Peor Escenario", 
+                         f"{analisis['escenarios']['Resultado_Total'].min():.2f}")
+                st.metric("Mejor Escenario", 
+                         f"{analisis['escenarios']['Resultado_Total'].max():.2f}")
+            st.metric("Número de Escenarios", len(analisis['escenarios']))
+        
+        st.subheader("🎯 Detalle de Todos los Escenarios")
+        df_escenarios = analisis['escenarios']
+        df_escenarios['Probabilidad'] = (df_escenarios['Probabilidad'] * 100).round(2)
+        df_escenarios['Resultado_Total'] = df_escenarios['Resultado_Total'].round(2)
+        df_escenarios['Contribucion_EV'] = df_escenarios['Contribucion_EV'].round(2)
+        
+        # Ordenar por resultado
+        df_escenarios = df_escenarios.sort_values('Resultado_Total', ascending=False)
+        st.dataframe(df_escenarios, use_container_width=True)
+
+# Información adicional
+with st.expander("💡 Cómo usar la aplicación"):
+    st.markdown(f"""
+    **Instrucciones:**
+    1. **Configura la carrera**: Número de competidores y cuántos se colocan
+    2. **Ingresa las odds** de cada competidor
+    3. **Selecciona el tipo de análisis**: Comparar todos o ver uno específico
+    4. **Revisa los resultados**: EV, stakes recomendados y escenarios
+    
+    **Ejemplo para carreras con menos competidores:**
+    - Carrera con 5 galgos, 2 colocados → Lay a 4 galgos
+    - Carrera con 4 galgos, 1 colocado → Lay a 3 galgos
+    - Carrera con 8 galgos, 3 colocados → Lay a 7 galgos
+    
+    **Fórmula general:** Lay a (N-1) galgos, donde N = total de competidores
+    """)
