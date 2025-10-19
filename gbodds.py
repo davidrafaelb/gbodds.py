@@ -39,6 +39,18 @@ def calcular_valor_y_stakes(win1, win2, place1, place2, commission=0.02):
     
     return back_stake1, back_stake2, valor_win1, valor_win2
 
+def calcular_ganancias(a, b, x, y, win1, win2, place1, place2, commission=0.02):
+    """Calcula ganancias para todos los escenarios"""
+    com_factor = 1 - commission
+    
+    G1 = a*(win1-1) - b - x*(place1-1) + y*com_factor
+    G2 = -a + b*(win2-1) + x*com_factor - y*(place2-1)
+    G3 = -a + b*(win2-1) - x*(place1-1) - y*(place2-1)
+    G4 = a*(win1-1) - b - x*(place1-1) - y*(place2-1)
+    G5 = -a - b + x*com_factor + y*com_factor
+    
+    return [G1, G2, G3, G4, G5]
+
 def optimizar_completo(win1, win2, place1, place2, commission=0.02):
     """
     Optimización COMPLETA: valor + stakes Back + stakes Lay
@@ -92,6 +104,10 @@ commission = st.slider("🎯 Comisión del Exchange (%)", 0.0, 10.0, 2.0) / 100
 if st.button("🎲 Optimizar con VALOR", type="primary"):
     back_stake1, back_stake2, lay_stake1, lay_stake2, valor1, valor2 = optimizar_completo(win1, win2, place1, place2, commission)
     
+    # Calcular ganancias para la tabla resumen
+    ganancias = calcular_ganancias(back_stake1, back_stake2, lay_stake1, lay_stake2, 
+                                 win1, win2, place1, place2, commission)
+    
     # MOSTRAR ANÁLISIS DE VALOR
     st.header("🔍 Análisis de Valor")
     
@@ -130,6 +146,45 @@ if st.button("🎲 Optimizar con VALOR", type="primary"):
         st.subheader("Lay a Colocado")
         st.metric("Contra Galgo 1", f"${lay_stake1:.2f}")
         st.metric("Contra Galgo 2", f"${lay_stake2:.2f}")
+    
+    # TABLA RESUMEN DE RESULTADOS (como antes)
+    st.header("📈 Resultados por Escenario")
+    
+    escenarios = [
+        "G1 gana, G2 no coloca",
+        "G2 gana, G1 no coloca", 
+        "G1 2do, G2 gana",
+        "G2 2do, G1 gana",
+        "Ambos no colocan"
+    ]
+    
+    resultados = []
+    for i, (esc, gan) in enumerate(zip(escenarios, ganancias)):
+        resultados.append({
+            'Escenario': esc,
+            'Ganancia/Neta': f"${gan:.3f}",
+            'Resultado': "✅ Ganancia" if gan >= 0 else "⚠️ Pérdida"
+        })
+    
+    df_resultados = pd.DataFrame(resultados)
+    st.table(df_resultados)
+    
+    # MÉTRICAS RESUMEN
+    st.subheader("📊 Resumen de Riesgo")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        ganancia_max = max(ganancias)
+        st.metric("Ganancia Máxima", f"${ganancia_max:.3f}")
+    
+    with col2:
+        perdida_max = min(ganancias) 
+        st.metric("Pérdida Máxima", f"${perdida_max:.3f}")
+    
+    with col3:
+        escenarios_ganadores = sum(1 for g in ganancias if g >= 0)
+        st.metric("Escenarios Favorables", f"{escenarios_ganadores}/5")
 
 # EXPLICACIÓN
 with st.expander("📚 ¿Cómo se calcula el VALOR?"):
