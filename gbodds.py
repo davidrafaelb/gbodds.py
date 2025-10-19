@@ -3,91 +3,74 @@ import pandas as pd
 import numpy as np
 
 def calcular_stakes_ganador(win1, win2, presupuesto_total=2.0):
-    """Prorratea los stakes a ganador según las odds - CORREGIDO"""
-    # Para odds iguales, stakes iguales
-    if abs(win1 - win2) < 0.01:  # Si las odds son iguales
-        stake1 = presupuesto_total / 2
-        stake2 = presupuesto_total / 2
-    else:
-        # Usar el método de valor esperado para prorrateo más inteligente
-        # Dar más stake a la odd con mejor valor (mayor odd)
-        valor1 = win1 * (1/win1)  # = 1, pero ajustamos por probabilidad
-        valor2 = win2 * (1/win2)  # = 1
-        
-        # En realidad, para back bets, queremos más stake en la odd con mayor valor esperado
-        # Pero como ambas tienen valor esperado similar, usamos un enfoque diferente
-        # Vamos a dar más stake a la odd más baja (más probable)
-        inv1 = 1 / win1
-        inv2 = 1 / win2
-        total_inv = inv1 + inv2
-        stake1 = (inv1 / total_inv) * presupuesto_total
-        stake2 = (inv2 / total_inv) * presupuesto_total
-    
+    """Prorratea los stakes a ganador según las odds"""
+    inv1 = 1 / win1
+    inv2 = 1 / win2
+    total_inv = inv1 + inv2
+    stake1 = (inv1 / total_inv) * presupuesto_total
+    stake2 = (inv2 / total_inv) * presupuesto_total
     return stake1, stake2
 
-def optimizacion_inteligente(win1, win2, place1, place2, commission=0.02):
-    """Optimización con stakes prorrateados - CORREGIDO"""
-    a, b = calcular_stakes_ganador(win1, win2)
+def calcular_todos_escenarios(a, b, x, y, win1, win2, place1, place2, commission=0.02):
+    """Calcula TODOS los 7 escenarios posibles"""
     com_factor = 1 - commission
     
-    # DEBUG: Mostrar cómo se calculan las stakes
-    print(f"DEBUG: win1={win1}, win2={win2}, stake1={a:.2f}, stake2={b:.2f}")
-    
-    prob_place1 = 1 / place1
-    prob_place2 = 1 / place2
-    
-    base_lay1 = prob_place1 * 3.0
-    base_lay2 = prob_place2 * 3.0
-    
-    if prob_place1 > prob_place2:
-        stake_lay1 = min(base_lay1, 2.5)
-        stake_lay2 = max(base_lay2 * 0.3, 0.2)
-    else:
-        stake_lay1 = max(base_lay1 * 0.3, 0.2)
-        stake_lay2 = min(base_lay2, 2.5)
-    
-    best_stake1, best_stake2 = stake_lay1, stake_lay2
-    best_perdida_max = float('inf')
-    
-    for ajuste1 in np.arange(-0.5, 0.5, 0.1):
-        for ajuste2 in np.arange(-0.3, 0.3, 0.1):
-            test_stake1 = max(0.1, stake_lay1 + ajuste1)
-            test_stake2 = max(0.1, stake_lay2 + ajuste2)
-            
-            G1 = a*(win1-1) - b - test_stake1*(place1-1) + test_stake2*com_factor
-            G2 = -a + b*(win2-1) + test_stake1*com_factor - test_stake2*(place2-1)
-            G3 = -a + b*(win2-1) - test_stake1*(place1-1) - test_stake2*(place2-1)
-            G4 = a*(win1-1) - b - test_stake1*(place1-1) - test_stake2*(place2-1)
-            G5 = -a - b + test_stake1*com_factor + test_stake2*com_factor
-            
-            perdida_max = min([G1, G2, G3, G4, G5])
-            
-            if perdida_max > best_perdida_max:
-                best_perdida_max = perdida_max
-                best_stake1, best_stake2 = test_stake1, test_stake2
-    
-    return a, b, best_stake1, best_stake2
-
-def calcular_ganancias(a, b, x, y, win1, win2, place1, place2, commission=0.02):
-    """Calcula ganancias para todos los escenarios"""
-    com_factor = 1 - commission
-    
+    # ESCENARIO 1: G1 gana, G2 no coloca
     G1 = a*(win1-1) - b - x*(place1-1) + y*com_factor
-    G2 = -a + b*(win2-1) + x*com_factor - y*(place2-1)
-    G3 = -a + b*(win2-1) - x*(place1-1) - y*(place2-1)
-    G4 = a*(win1-1) - b - x*(place1-1) - y*(place2-1)
-    G5 = -a - b + x*com_factor + y*com_factor
     
-    return [G1, G2, G3, G4, G5]
+    # ESCENARIO 2: G2 gana, G1 no coloca
+    G2 = -a + b*(win2-1) + x*com_factor - y*(place2-1)
+    
+    # ESCENARIO 3: G1 2do, G2 gana (ambos se colocan)
+    G3 = -a + b*(win2-1) - x*(place1-1) - y*(place2-1)
+    
+    # ESCENARIO 4: G2 2do, G1 gana (ambos se colocan)
+    G4 = a*(win1-1) - b - x*(place1-1) - y*(place2-1)
+    
+    # ESCENARIO 5: G1 2do, OTRO galgo gana
+    G5 = -a - b - x*(place1-1) + y*com_factor
+    
+    # ESCENARIO 6: G2 2do, OTRO galgo gana
+    G6 = -a - b + x*com_factor - y*(place2-1)
+    
+    # ESCENARIO 7: Ambos no colocan
+    G7 = -a - b + x*com_factor + y*com_factor
+    
+    return [G1, G2, G3, G4, G5, G6, G7]
+
+def optimizar_stakes_completo(win1, win2, place1, place2, commission=0.02):
+    """Optimización considerando TODOS los escenarios"""
+    a, b = calcular_stakes_ganador(win1, win2)
+    
+    # Búsqueda grid exhaustiva
+    best_x, best_y = 0, 0
+    best_score = -np.inf
+    
+    for x in np.arange(0.1, 3.0, 0.05):
+        for y in np.arange(0.1, 3.0, 0.05):
+            ganancias = calcular_todos_escenarios(a, b, x, y, win1, win2, place1, place2, commission)
+            
+            # Score: maximizar la ganancia mínima y minimizar pérdidas grandes
+            ganancia_min = min(ganancias)
+            perdida_max = abs(min([0] + [g for g in ganancias if g < 0]))
+            
+            # Penalizar pérdidas grandes, premiar ganancias consistentes
+            score = ganancia_min - (perdida_max * 0.1)
+            
+            if score > best_score:
+                best_score = score
+                best_x, best_y = x, y
+    
+    return a, b, best_x, best_y
 
 # INTERFAZ STREAMLIT
-st.set_page_config(page_title="Optimizador Corregido", page_icon="🏁", layout="centered")
+st.set_page_config(page_title="Optimizador Completo", page_icon="🏁", layout="centered")
 
-st.title("🏁 Optimizador con Stakes Corregidas")
+st.title("🏁 Optimizador COMPLETO - 7 Escenarios")
 
-st.info("🔧 **Cálculo de stakes corregido** - Odds iguales = Stakes iguales")
+st.info("🔍 **Ahora considera TODOS los escenarios posibles**")
 
-# Entrada de datos en sidebar
+# Entrada de datos
 with st.sidebar:
     st.header("⚙️ Configuración")
     
@@ -95,117 +78,111 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     
     with col1:
-        win1 = st.number_input("G1 - Ganar", value=4.0, min_value=1.0, key="win1")
-        place1 = st.number_input("G1 - Colocado", value=2.0, min_value=1.0, key="place1")
+        win1 = st.number_input("G1 - Ganar", value=5.8, min_value=1.0, key="win1")
+        place1 = st.number_input("G1 - Colocado", value=2.62, min_value=1.0, key="place1")
     
     with col2:
-        win2 = st.number_input("G2 - Ganar", value=4.0, min_value=1.0, key="win2")  
-        place2 = st.number_input("G2 - Colocado", value=2.0, min_value=1.0, key="place2")
+        win2 = st.number_input("G2 - Ganar", value=7.0, min_value=1.0, key="win2")  
+        place2 = st.number_input("G2 - Colocado", value=3.55, min_value=1.0, key="place2")
     
-    presupuesto = st.number_input("💰 Presupuesto Total Back ($)", value=2.0, min_value=1.0, step=0.5)
-    commission = st.slider("🎯 Comisión del Exchange (%)", 0.0, 10.0, 2.0) / 100
+    presupuesto = st.number_input("💰 Presupuesto Back", value=2.0, min_value=1.0, step=0.5)
+    commission = st.slider("🎯 Comisión Exchange (%)", 0.0, 10.0, 2.0) / 100
 
-# Calcular stakes base
-if 'stakes_base' not in st.session_state or st.button("🔄 Calcular Nueva Estrategia"):
-    with st.spinner("Calculando estrategia óptima..."):
-        stake_win1_base, stake_win2_base, stake_lay1_base, stake_lay2_base = optimizacion_inteligente(
+# Calcular estrategia
+if st.button("🎲 Calcular Estrategia Completa", type="primary"):
+    with st.spinner("Optimizando considerando todos los escenarios..."):
+        stake_win1, stake_win2, stake_lay1, stake_lay2 = optimizar_stakes_completo(
             win1, win2, place1, place2, commission
         )
-    st.session_state.stakes_base = {
-        'win1': stake_win1_base,
-        'win2': stake_win2_base, 
-        'lay1': stake_lay1_base,
-        'lay2': stake_lay2_base
-    }
-
-# Control de ajuste de stakes
-st.header("🎛️ Ajuste de Stakes")
-
-ajuste_porcentaje = st.slider(
-    "📈 Ajustar todas las stakes (%)",
-    min_value=-50,
-    max_value=200, 
-    value=0,
-    step=10
-)
-
-# Aplicar ajuste
-factor_ajuste = 1 + (ajuste_porcentaje / 100)
-
-stake_win1_ajustado = st.session_state.stakes_base['win1'] * factor_ajuste
-stake_win2_ajustado = st.session_state.stakes_base['win2'] * factor_ajuste  
-stake_lay1_ajustado = st.session_state.stakes_base['lay1'] * factor_ajuste
-stake_lay2_ajustado = st.session_state.stakes_base['lay2'] * factor_ajuste
-
-# Calcular ganancias
-ganancias_ajustadas = calcular_ganancias(
-    stake_win1_ajustado, stake_win2_ajustado,
-    stake_lay1_ajustado, stake_lay2_ajustado,
-    win1, win2, place1, place2, commission
-)
-
-# MOSTRAR RESULTADOS
-st.header("💡 Estrategia con Stakes Ajustadas")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("Apuestas a Ganador")
+        ganancias = calcular_todos_escenarios(
+            stake_win1, stake_win2, stake_lay1, stake_lay2,
+            win1, win2, place1, place2, commission
+        )
     
-    # Verificar si las stakes son iguales para odds iguales
-    if abs(win1 - win2) < 0.01:
-        st.success("✅ Odds iguales - Stakes iguales")
+    # MOSTRAR RESULTADOS
+    st.header("💡 Estrategia Optimizada")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Apuestas a Ganador")
+        st.metric("Galgo 1", f"${stake_win1:.2f} @ {win1:.2f}")
+        st.metric("Galgo 2", f"${stake_win2:.2f} @ {win2:.2f}")
+    
+    with col2:
+        st.subheader("Lay a Colocado")
+        st.metric("Contra Galgo 1", f"${stake_lay1:.2f}")
+        st.metric("Contra Galgo 2", f"${stake_lay2:.2f}")
+    
+    # TABLA COMPLETA DE ESCENARIOS
+    st.header("📈 TODOS los Escenarios Posibles")
+    
+    escenarios = [
+        "G1 gana, G2 no coloca",
+        "G2 gana, G1 no coloca", 
+        "G1 2do, G2 gana (ambos colocados)",
+        "G2 2do, G1 gana (ambos colocados)",
+        "🔴 G1 2do, OTRO galgo gana",
+        "🔴 G2 2do, OTRO galgo gana",
+        "Ambos no colocan"
+    ]
+    
+    resultados = []
+    for i, (esc, gan) in enumerate(zip(escenarios, ganancias)):
+        resultado = {
+            'Escenario': esc,
+            'Ganancia/Neta': f"${gan:.3f}",
+            'Resultado': "✅ Ganancia" if gan >= 0 else "⚠️ Pérdida Leve" if gan >= -1 else "🔴 Pérdida Grave"
+        }
+        resultados.append(resultado)
+    
+    df_resultados = pd.DataFrame(resultados)
+    st.table(df_resultados)
+    
+    # ANÁLISIS ESTADÍSTICO
+    st.header("📊 Análisis Estadístico Completo")
+    
+    escenarios_ganadores = sum(1 for g in ganancias if g >= 0)
+    escenarios_perdedores = len(ganancias) - escenarios_ganadores
+    perdida_maxima = min(ganancias)
+    ganancia_maxima = max(ganancias)
+    ganancia_promedio = np.mean(ganancias)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Escenarios Ganadores", f"{escenarios_ganadores}/7")
+    
+    with col2:
+        st.metric("Pérdida Máxima", f"${perdida_maxima:.3f}")
+    
+    with col3:
+        st.metric("Ganancia Máxima", f"${ganancia_maxima:.3f}")
+    
+    with col4:
+        st.metric("Ganancia Promedio", f"${ganancia_promedio:.3f}")
+    
+    # RECOMENDACIÓN FINAL
+    st.header("🎯 Recomendación Final")
+    
+    if ganancia_promedio > 0 and perdida_maxima > -2:
+        st.success("✅ **STRATEGIA VIABLE** - Valor esperado positivo y riesgo controlado")
+    elif ganancia_promedio > 0:
+        st.warning("⚠️ **STRATEGIA RIESGOSA** - Valor positivo pero pérdidas potenciales altas")
     else:
-        st.info("ℹ️ Odds diferentes - Stakes prorrateadas")
-    
-    st.metric("Galgo 1", f"${stake_win1_ajustado:.2f} @ {win1:.2f}",
-              f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-    st.metric("Galgo 2", f"${stake_win2_ajustado:.2f} @ {win2:.2f}",
-              f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-    
-    # Mostrar cálculo de prorrateo
-    with st.expander("📐 Ver cálculo de prorrateo"):
-        stake1_base, stake2_base = calcular_stakes_ganador(win1, win2, presupuesto)
-        st.write(f"**Método de prorrateo:**")
-        st.write(f"- Probabilidad implícita G1: {1/win1:.3f} ({1/win1*100:.1f}%)")
-        st.write(f"- Probabilidad implícita G2: {1/win2:.3f} ({1/win2*100:.1f}%)")
-        st.write(f"- Stake G1: ({1/win1:.3f} / {1/win1 + 1/win2:.3f}) × ${presupuesto} = ${stake1_base:.2f}")
-        st.write(f"- Stake G2: ({1/win2:.3f} / {1/win1 + 1/win2:.3f}) × ${presupuesto} = ${stake2_base:.2f}")
+        st.error("🔴 **NO RECOMENDADO** - Valor esperado negativo")
 
-with col2:
-    st.subheader("Lay a Colocado")
-    st.metric("Contra Galgo 1", f"${stake_lay1_ajustado:.2f}",
-              f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-    st.metric("Contra Galgo 2", f"${stake_lay2_ajustado:.2f}", 
-              f"{ajuste_porcentaje:+.0f}%" if ajuste_porcentaje != 0 else "")
-
-# TABLA DE ESCENARIOS
-st.subheader("📈 Resultados por Escenario")
-
-escenarios = [
-    "G1 gana, G2 no coloca",
-    "G2 gana, G1 no coloca", 
-    "G1 2do, G2 gana",
-    "G2 2do, G1 gana",
-    "Ambos no colocan"
-]
-
-resultados = []
-for i, (esc, gan) in enumerate(zip(escenarios, ganancias_ajustadas)):
-    resultados.append({
-        'Escenario': esc,
-        'Ganancia/Neta': f"${gan:.3f}",
-        'Resultado': "✅ Ganancia" if gan >= 0 else "⚠️ Pérdida"
-    })
-
-df_resultados = pd.DataFrame(resultados)
-st.table(df_resultados)
-
-# VERIFICACIÓN DE CONSISTENCIA
-if abs(win1 - win2) < 0.01 and abs(stake_win1_ajustado - stake_win2_ajustado) > 0.01:
-    st.error("🚨 **INCONSISTENCIA DETECTADA:** Odds iguales pero stakes diferentes!")
-    st.write(f"G1 Stake: ${stake_win1_ajustado:.2f}, G2 Stake: ${stake_win2_ajustado:.2f}")
-    st.write("Esto indica un error en el cálculo de prorrateo.")
+# EXPLICACIÓN DE ESCENARIOS
+with st.expander("📖 Explicación de los 7 Escenarios"):
+    st.write("""
+    **1. G1 gana, G2 no coloca** - Solo G1 se coloca (1ro)
+    **2. G2 gana, G1 no coloca** - Solo G2 se coloca (1ro)  
+    **3. G1 2do, G2 gana** - Ambos se colocan (G2 1ro, G1 2do)
+    **4. G2 2do, G1 gana** - Ambos se colocan (G1 1ro, G2 2do)
+    **5. G1 2do, OTRO gana** - G1 se coloca pero otro galgo gana
+    **6. G2 2do, OTRO gana** - G2 se coloca pero otro galgo gana
+    **7. Ambos no colocan** - Ninguno termina 1ro o 2do
+    """)
 
 st.markdown("---")
 st.caption("⚠️ Herramienta educativa - Apueste responsablemente")
